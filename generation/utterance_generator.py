@@ -75,7 +75,7 @@ def get_action_template(action, intent):
   return SEPARATOR.join(parts)
 
 
-class TemplateUtteranceGenerator:
+class TemplateUtteranceGenerator(object):
   """Generates template utterance for a dialogue turn."""
 
   def __init__(self, template_dir, use_canonical_values=False):
@@ -201,8 +201,7 @@ class TemplateUtteranceGenerator:
       for action in sorted(frame["actions"], key=self._act_key_fn):
         # Get the active intent corresponding to this action.
         intent = self._get_intent(action, frame)
-        utterance = self._get_utterance_for_action(frame["service"], intent,
-                                                   action, schema)
+        utterance = self._get_utterance_for_action(frame["service"], intent, action, schema)
 
         utterances.append(utterance)
     return " ".join(utterances)

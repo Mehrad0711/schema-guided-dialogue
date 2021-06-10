@@ -21,23 +21,18 @@ import random
 
 from absl import app
 from absl import flags
-from schema_guided_dialogue.generation import utterance_generator
-import tensorflow as tf
+from utterance_generator import TemplateUtteranceGenerator
 
 
 flags.DEFINE_string("sgd_dir", None, "Directory containing the SGD dataset.")
-flags.DEFINE_string("output_dir", None,
-                    "Directory where datasets will be created.")
-flags.DEFINE_boolean("delexicalize", False,
-                     "Whether to delexicalize non-categorical slots")
-flags.DEFINE_string("templates_dir", None,
-                    "Directory contains utterance templates.")
+flags.DEFINE_string("output_dir", None, "Directory where datasets will be created.")
+flags.DEFINE_boolean("delexicalize", False, "Whether to delexicalize non-categorical slots")
+flags.DEFINE_string("templates_dir", 'utterance_templates/', "Directory contains utterance templates.")
+flags.DEFINE_string("fewshot_ids_dir", 'fewshot_splits/', "Directory contains fewshot ids list.")
 
 FLAGS = flags.FLAGS
 
 SEPARATOR = " | "
-_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-FEWSHOT_IDS_DIR = f"{_CURRENT_DIR}/fewshot_splits"
 
 
 def _remove_newline_and_tabs(s):
@@ -66,8 +61,7 @@ class Preprocessor:
     self.input_representation_type = input_representation_type
     self.add_slot_desc = (self.input_representation_type == "schema_guided")
     self.schemas_str_repr = self.preprocess_schemas(schemas_path)
-    self._utterance_gen = utterance_generator.TemplateUtteranceGenerator(
-        FLAGS.templates_dir)
+    self._utterance_gen = TemplateUtteranceGenerator(FLAGS.templates_dir)
 
   def preprocess_slot(self, slot):
     slot_str = f"name={slot['name']},description={slot['description']}"
@@ -76,14 +70,14 @@ class Preprocessor:
     return slot_str
 
   def load_schema(self, schemas_path, service):
-    schemas = json.load(tf.io.gfile.GFile(schemas_path))
+    schemas = json.load(open(schemas_path, 'r'))
     for schema in schemas:
       if schema["service_name"] == service:
         return schema
     return schemas
 
   def preprocess_schemas(self, schemas_path):
-    schemas = json.load(tf.io.gfile.GFile(schemas_path))
+    schemas = json.load(open(schemas_path, 'r'))
     schemas_str_repr = {
         schema["service_name"]: self.preprocess_schema(schema)
         for schema in schemas
@@ -155,9 +149,8 @@ class Preprocessor:
 
   def create_tsv_data(self, dialogs, output_tsv_path, query_dialog_ids=None):
     """Convert a dialog json file into a tsv for seq2seq models."""
-    count = 0
     random.shuffle(dialogs)
-    with tf.io.gfile.GFile(output_tsv_path, "w") as tsvfile:
+    with open(output_tsv_path, "w") as tsvfile:
       writer = csv.writer(tsvfile, delimiter="\t")
       for dialog in dialogs:
         dialog_id = dialog["dialogue_id"]
@@ -174,10 +167,8 @@ class Preprocessor:
           if len(services) > 1 and self.input_representation_type != "t2g2":
             raise ValueError("found turn with multiple services. exiting.")
           service = services[0]
-          schema = self.load_schema(self.schemas_path,
-                                    service) if FLAGS.delexicalize else None
-          text = _remove_newline_and_tabs(
-              self.preprocess_target_utterance(turn, schema))
+          schema = self.load_schema(self.schemas_path, service) if FLAGS.delexicalize else None
+          text = _remove_newline_and_tabs(self.preprocess_target_utterance(turn, schema))
           structured_data = self.preprocess_turn(turn, schema)
           structured_data = _remove_newline_and_tabs(structured_data)
           metadata = _remove_newline_and_tabs(json.dumps(turn))
@@ -187,10 +178,10 @@ class Preprocessor:
 
 def create_fewshot_splits(dialogs, data_processor, output_dir, encoding_scheme):
   """Create fewshot splits for the training set."""
-  for filename in os.listdir(FEWSHOT_IDS_DIR):
+  for filename in os.listdir(FLAGS.fewshot_ids_dir):
     dialog_ids = set()
-    with tf.io.gfile.GFile(os.path.join(FEWSHOT_IDS_DIR, filename)) as f:
-      for line in f:
+    with open(os.path.join(FLAGS.fewshot_ids_dir, filename), 'r') as fin:
+      for line in fin:
         dialog_ids.add(line.strip())
     data_size = filename[:-4]  # Remove the .txt extension.
     tsv_path = os.path.join(output_dir, f"{encoding_scheme}_{data_size}.tsv")
@@ -205,7 +196,7 @@ def main(_):
     for filename in os.listdir(dataset_dir):
       if filename.startswith("schema"):
         continue
-      with tf.io.gfile.GFile(os.path.join(dataset_dir, filename)) as f:
+      with open(os.path.join(dataset_dir, filename), 'r') as f:
         dialogs.extend(json.load(f))
 
     for encoding_scheme in ["naive", "schema_guided", "t2g2"]:
@@ -215,15 +206,14 @@ def main(_):
 
       # Create the tsv file containing data from all dialogues in the split.
       output_dir = os.path.join(FLAGS.output_dir, split)
-      if not tf.io.gfile.isdir(output_dir):
-        tf.io.gfile.makedirs(output_dir)
+      if not os.path.isdir(output_dir):
+        os.makedirs(output_dir)
       output_tsv_path = os.path.join(output_dir, f"{encoding_scheme}_all.tsv")
       data_processor.create_tsv_data(dialogs, output_tsv_path)
 
       # Create fewshot splits for the training set.
       if split == "train":
-        create_fewshot_splits(dialogs, data_processor, output_dir,
-                              encoding_scheme)
+        create_fewshot_splits(dialogs, data_processor, output_dir, encoding_scheme)
 
 
 if __name__ == "__main__":
